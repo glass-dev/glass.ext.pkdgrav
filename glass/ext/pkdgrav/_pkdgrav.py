@@ -1,5 +1,6 @@
 import dataclasses
 import os
+from collections.abc import Iterator
 
 import numpy as np
 
@@ -52,5 +53,43 @@ class Simulation:
         self.redshifts = z[::-1]
 
 
+@dataclasses.dataclass
+class Step:
+    """
+    Metadata for simulation steps.
+    """
+
+    step: int
+    near_redshift: float
+    far_redshift: float
+    comoving_volume: float
+    mean_density: float
+    mean_particles: float
+
+
 def load(path: str | os.PathLike[str]) -> Simulation:
     return Simulation(path)
+
+
+def steps(sim: Simulation) -> Iterator[Step]:
+    """
+    Returns an iterator of metadata for each simulation step.
+    """
+
+    # pre-compute some simulation properties
+    boxsize = sim.parameters["dBoxSize"] / sim.cosmology.h
+    density = (sim.parameters["nGrid"] / boxsize) ** 3
+
+    steps = range(sim.parameters["nSteps"], 0, -1)
+    redshifts = sim.redshifts
+    for step, z_near, z_far in zip(steps, redshifts, redshifts[1:]):
+        comoving_volume = sim.cosmology.comoving_volume(z_near, z_far)
+
+        yield Step(
+            step=step,
+            near_redshift=z_near,
+            far_redshift=z_far,
+            comoving_volume=comoving_volume,
+            mean_density=density,
+            mean_particles=density * comoving_volume,
+        )
