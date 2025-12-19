@@ -1,11 +1,12 @@
+import dataclasses
 import os
-from typing import Literal
 from collections.abc import Iterator
+from typing import Literal
 
 import healpy as hp
 import numpy as np
 
-from ._pkdgrav import Simulation
+from ._pkdgrav import Simulation, steps
 
 
 class NpyLoader:
@@ -63,36 +64,26 @@ def read_gowerst(
     else:
         raise ValueError(f"unknown format: {format}")
 
-    # pre-compute some simulation properties
-    boxsize = sim.parameters["dBoxSize"] / sim.cosmology.h
-    density = (sim.parameters["nGrid"] / boxsize) ** 3
-
-    steps = range(sim.parameters["nSteps"], 0, -1)
-    redshifts = sim.redshifts
-    for step, z_near, z_far in zip(steps, redshifts, redshifts[1:]):
-        if zmax is not None and zmax < z_near:
+    # iterate shells
+    for step in steps(sim):
+        if zmax is not None and zmax < step.near_redshift:
             break
 
-        data = loader(step)
+        data = loader(step.step)
 
-        comoving_volume = sim.cosmology.comoving_volume(z_near, z_far)
+        # number of particles in shell
+        particles = data.sum()
 
-        metadata = {
-            "comoving volume": comoving_volume,
-            "far redshift": z_far,
-            "mean density": density,
-            "mean particles": density * comoving_volume,
-            "near redshift": z_near,
-            "particles": data.sum(),
-        }
+        metadata = dataclasses.asdict(step)
+        metadata["particles"] = particles
 
         if nside is not None and nside != hp.get_nside(data):
             # keep the number of particles constant
             data = hp.ud_grade(data, nside, power=-2)
-            assert data.sum() == metadata["particles"], "resampling lost particles!"
+            assert data.sum() == particles, "resampling lost particles!"
 
         if not raw:
-            nbar = metadata["mean particles"] / data.size
+            nbar = step.mean_particles / data.size
             data = data / nbar - 1.0
 
         # attach metadata
